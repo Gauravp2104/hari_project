@@ -1,0 +1,43 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+
+# --- Secrets / env ---
+.env
+.env.local
+*.key
+
+# --- Data artifacts (don't commit raw scrapes or generated stores) ---
+data/raw/*
+data/processed/*
+data/knowledge_graph/*
+data/vector_store/*
+data/answer_cache/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/knowledge_graph/.gitkeep
+!data/vector_store/.gitkeep
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# --- Test / coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/

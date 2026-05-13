@@ -1,0 +1,30 @@
+# --- Ingestion ---
+pandas>=2.2
+openpyxl>=3.1
+pyarrow>=15.0
+python-dotenv>=1.0
+
+# --- Knowledge graph ---
+networkx>=3.3
+spacy>=3.7
+rdflib>=7.0
+# After installing spacy, also run:
+#   python -m spacy download en_core_web_sm
+
+# --- Embeddings & vector store ---
+sentence-transformers>=3.0
+chromadb>=0.5
+
+# --- RAG orchestration & LLM ---
+ollama>=0.6              # local LLM client (Mistral 7B by default) — used for question answering
+anthropic>=0.40          # cloud LLM — used for KG relation extraction only (Haiku 4.5)
+langchain>=0.3
+langchain-community>=0.3
+
+# --- Query / UI ---
+streamlit>=1.36
+pyvis>=0.3                # interactive KG visualization (renders to HTML for embedding)
+
+# --- Dev / testing ---
+pytest>=8.2
+ruff>=0.6
