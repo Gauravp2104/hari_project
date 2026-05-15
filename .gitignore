@@ -16,11 +16,11 @@ env/
 .env.local
 *.key
 
-# --- Data artifacts (don't commit raw scrapes or generated stores) ---
+# --- Data artifacts ---
+# Raw Excel scrapes and runtime answer cache are not deployed.
+# Pre-built vector store, KG, and processed parquet ARE committed (via Git LFS)
+# so the deployed Hugging Face Space starts hot without a rebuild step.
 data/raw/*
-data/processed/*
-data/knowledge_graph/*
-data/vector_store/*
 data/answer_cache/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep

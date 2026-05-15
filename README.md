@@ -1,3 +1,13 @@
+---
+title: Packaging Developments
+emoji: "\U0001F4E6"
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Packaging Developments — Research Assistant
 
 A retrieval-augmented research assistant over a corpus of scraped packaging-industry news. Combines:
