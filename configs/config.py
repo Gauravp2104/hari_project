@@ -2,7 +2,12 @@
 
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Load local .env if present (no-op when env vars already set by the host, e.g. HF Spaces secrets).
+load_dotenv(PROJECT_ROOT / ".env")
 
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
