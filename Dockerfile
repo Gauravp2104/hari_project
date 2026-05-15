@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # System deps + Ollama (install as root)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates bash procps && \
+        curl ca-certificates bash procps zstd && \
     curl -fsSL https://ollama.com/install.sh | sh && \
     rm -rf /var/lib/apt/lists/*
 
