@@ -14,7 +14,7 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
-OLLAMA_MODEL = "mistral:7b"
+OLLAMA_MODEL = "qwen2.5:3b"
 OLLAMA_HOST = "http://localhost:11434"
 OLLAMA_NUM_CTX = 8192
 OLLAMA_TEMPERATURE = 0.2

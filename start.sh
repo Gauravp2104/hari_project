@@ -10,7 +10,7 @@ for i in {1..30}; do
     sleep 1
 done
 
-ollama pull "${OLLAMA_MODEL:-mistral:7b}"
+ollama pull "${OLLAMA_MODEL:-qwen2.5:3b}"
 
 exec streamlit run app.py \
     --server.port=7860 \
