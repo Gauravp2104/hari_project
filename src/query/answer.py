@@ -1,13 +1,11 @@
-"""RAG answer pipeline using a local Ollama model (Mistral 7B by default).
+"""RAG answer pipeline using Anthropic Claude (Haiku by default).
 
-Pipeline: retrieve top-k chunks from ChromaDB -> assemble prompt -> ollama.chat ->
-answer + citations. Keeps the same `answer_question()` signature as before so the
-Streamlit app needs no changes.
+Pipeline: retrieve top-k chunks from ChromaDB -> assemble prompt -> Claude messages ->
+answer + citations.
 
 Usage:
     python -m src.query.answer "what are the latest bioplastics trends?"
     python -m src.query.answer "who acquired whom recently?" --k 12
-    python -m src.query.answer "..." --model qwen2.5:3b
 """
 
 from __future__ import annotations
@@ -18,9 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from configs.config import OLLAMA_HOST, OLLAMA_MODEL  # noqa: E402
+from configs.config import ANSWER_MODEL  # noqa: E402
 from src.query.intent import Intent, chitchat_response, classify_intent  # noqa: E402
-from src.query.llm_client import OllamaChatClient  # noqa: E402
+from src.query.llm_client import AnthropicChatClient  # noqa: E402
 from src.rag.retrieve import RetrievedChunk, dedup_by_article, retrieve  # noqa: E402
 
 
@@ -82,16 +80,17 @@ def answer_question(
     question: str,
     k: int = 8,
     category_filter: str | None = None,
-    model: str = OLLAMA_MODEL,
-    host: str = OLLAMA_HOST,
+    model: str = ANSWER_MODEL,
     system_prompt: str | None = None,
-    client: OllamaChatClient | None = None,
+    client: AnthropicChatClient | None = None,
+    **_ignored,
 ) -> AnswerResult:
     """Answer a research question using RAG over the corpus.
 
-    `client` lets the caller pass an already-built OllamaChatClient (e.g. shared
+    `client` lets the caller pass an already-built AnthropicChatClient (e.g. shared
     across many questions). When omitted, a client is built per-call using
-    `model`, `host`, and `system_prompt` (defaults to SYSTEM_PROMPT).
+    `model` and `system_prompt` (defaults to SYSTEM_PROMPT).
+    Extra kwargs are ignored for backward compatibility with old Ollama callers.
     """
     intent = classify_intent(question)
     if intent != Intent.RESEARCH:
@@ -123,9 +122,8 @@ def answer_question(
     )
 
     if client is None:
-        client = OllamaChatClient(
+        client = AnthropicChatClient(
             model=model,
-            host=host,
             system_prompt=system_prompt or SYSTEM_PROMPT,
         )
     response = client.chat(user_msg, system_prompt=system_prompt)
@@ -145,13 +143,12 @@ def answer_question(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ask a question against the developments corpus (local Ollama)."
+        description="Ask a question against the developments corpus (Anthropic Claude)."
     )
     parser.add_argument("question", help="The natural-language question")
     parser.add_argument("--k", type=int, default=8, help="Number of articles to retrieve")
     parser.add_argument("--category", default=None, help="Restrict retrieval to one category")
-    parser.add_argument("--model", default=OLLAMA_MODEL, help=f"Ollama model (default: {OLLAMA_MODEL})")
-    parser.add_argument("--host", default=OLLAMA_HOST, help=f"Ollama host (default: {OLLAMA_HOST})")
+    parser.add_argument("--model", default=ANSWER_MODEL, help=f"Claude model (default: {ANSWER_MODEL})")
     args = parser.parse_args()
 
     result = answer_question(
@@ -159,7 +156,6 @@ def main():
         k=args.k,
         category_filter=args.category,
         model=args.model,
-        host=args.host,
     )
     print(result.answer)
     print()

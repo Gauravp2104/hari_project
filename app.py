@@ -20,7 +20,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from configs.config import OLLAMA_HOST, OLLAMA_MODEL  # noqa: E402
+from configs.config import ANSWER_MODEL  # noqa: E402
 from src.query.answer import answer_question  # noqa: E402
 from src.query.kg_lookup import find_entities_in_text, load_graph, profile  # noqa: E402
 from src.query.kg_viz import render_for_query_entities, render_top_entities  # noqa: E402
@@ -62,14 +62,14 @@ def _disk_cache_put(key: str, payload: dict) -> None:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def cached_answer(question: str, k: int, category: str | None, model: str, host: str):
+def cached_answer(question: str, k: int, category: str | None, model: str):
     """Two-tier cache: in-process (1h TTL) → disk (no expiry)."""
     key = _cache_key(question, k, model, category)
     disk = _disk_cache_get(key)
     if disk:
         return {**disk, "cache_layer": "disk"}
 
-    result = answer_question(question, k=k, category_filter=category, model=model, host=host)
+    result = answer_question(question, k=k, category_filter=category, model=model)
     payload = {
         "answer": result.answer,
         "sources": [
@@ -117,7 +117,7 @@ with st.sidebar:
     st.header("Settings")
     k = st.slider("Articles to retrieve", 3, 20, 8)
     show_kg_panel = st.checkbox("Show entity neighborhood for each question", value=True)
-    model_name = st.text_input("Ollama model", value=OLLAMA_MODEL)
+    model_name = st.text_input("Answer model (Claude)", value=ANSWER_MODEL)
     st.divider()
 
     if not _kg_loaded():
@@ -188,7 +188,7 @@ with tab_ask:
         with st.chat_message("assistant"):
             with st.spinner("Searching corpus and generating answer..."):
                 try:
-                    result = cached_answer(question, k, None, model_name, OLLAMA_HOST)
+                    result = cached_answer(question, k, None, model_name)
                 except Exception as e:
                     st.error(f"Error: {e}")
                     st.stop()

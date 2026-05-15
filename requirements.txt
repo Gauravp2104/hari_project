@@ -16,8 +16,7 @@ sentence-transformers>=3.0
 chromadb>=0.5
 
 # --- RAG orchestration & LLM ---
-ollama>=0.6              # local LLM client (Mistral 7B by default) — used for question answering
-anthropic>=0.40          # cloud LLM — used for KG relation extraction only (Haiku 4.5)
+anthropic>=0.40          # Claude Haiku 4.5 — used for both question answering and KG relation extraction
 langchain>=0.3
 langchain-community>=0.3
 

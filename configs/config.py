@@ -14,11 +14,12 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 
-OLLAMA_MODEL = "qwen2.5:3b"
-OLLAMA_HOST = "http://localhost:11434"
-OLLAMA_NUM_CTX = 8192
-OLLAMA_TEMPERATURE = 0.2
+# Answering LLM (Anthropic Claude via API).
+ANSWER_MODEL = "claude-haiku-4-5"
+ANSWER_MAX_TOKENS = 1024
+ANSWER_TEMPERATURE = 0.2
 
+# KG relation extraction model (also Anthropic).
 KG_RELATION_MODEL = "claude-haiku-4-5"
 
 for _d in (RAW_DIR, PROCESSED_DIR, KG_DIR, VECTOR_STORE_DIR):
