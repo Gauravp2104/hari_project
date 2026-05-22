@@ -39,9 +39,9 @@ def _kg_loaded() -> bool:
     return load_graph() is not None
 
 
-def _cache_key(question: str, k: int, model: str, category: str | None) -> str:
+def _cache_key(question: str, k: int, model: str) -> str:
     raw = json.dumps(
-        {"q": question.strip().lower(), "k": k, "m": model, "c": category or ""},
+        {"q": question.strip().lower(), "k": k, "m": model},
         sort_keys=True,
     )
     return hashlib.sha1(raw.encode()).hexdigest()
@@ -62,16 +62,27 @@ def _disk_cache_put(key: str, payload: dict) -> None:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def cached_answer(question: str, k: int, category: str | None, model: str):
+def cached_answer(question: str, k: int, model: str):
     """Two-tier cache: in-process (1h TTL) → disk (no expiry)."""
-    key = _cache_key(question, k, model, category)
+    key = _cache_key(question, k, model)
     disk = _disk_cache_get(key)
     if disk:
         return {**disk, "cache_layer": "disk"}
 
-    result = answer_question(question, k=k, category_filter=category, model=model)
+    result = answer_question(question, k=k, model=model)
     payload = {
-        "answer": result.answer,
+        "trends": result.trends,
+        "trend_cards": [
+            {
+                "trend": c.trend,
+                "category": c.category,
+                "implication": c.implication,
+                "dev_article_ids": c.dev_article_ids,
+                "dev_titles": c.dev_titles,
+            }
+            for c in result.trend_cards
+        ],
+        "developments": result.developments,
         "sources": [
             {
                 "article_id": s.article_id,
@@ -83,8 +94,11 @@ def cached_answer(question: str, k: int, category: str | None, model: str):
             }
             for s in result.sources
         ],
+        "category": result.category,
         "model": result.model,
+        "trends_model": result.trends_model,
         "intent": result.intent,
+        "notes": result.notes,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "cache_layer": "fresh",
@@ -117,7 +131,7 @@ with st.sidebar:
     st.header("Settings")
     k = st.slider("Articles to retrieve", 3, 20, 8)
     show_kg_panel = st.checkbox("Show entity neighborhood for each question", value=True)
-    model_name = st.text_input("Answer model (Claude)", value=ANSWER_MODEL)
+    model_name = st.text_input("Answer model (Ollama)", value=ANSWER_MODEL)
     st.divider()
 
     if not _kg_loaded():
@@ -149,6 +163,32 @@ with st.sidebar:
     )
 
 
+def _render_trend_cards(cards: list[dict], sources_by_id: dict[str, dict]) -> None:
+    """Render each validated trend as a card with category badge + cited devs."""
+    for card in cards:
+        st.markdown(
+            f"**Trend** · `{card.get('category', '')}`  \n{card.get('trend', '')}"
+        )
+        if card.get("implication"):
+            st.markdown(f"*Implication:* {card['implication']}")
+        if card.get("dev_article_ids"):
+            st.markdown("*Key developments:*")
+            for aid, title in zip(card["dev_article_ids"], card.get("dev_titles", [])):
+                src = sources_by_id.get(aid)
+                if src:
+                    date = src["date"].split(" ")[0] if src.get("date") else ""
+                    bits = [title]
+                    if date:
+                        bits.append(f"*{date}*")
+                    line = f"- " + " — ".join(bits)
+                    if src.get("link"):
+                        line += f"  \n  [article link]({src['link']})"
+                    st.markdown(line)
+                else:
+                    st.markdown(f"- {title}")
+        st.divider()
+
+
 tab_ask, tab_explore = st.tabs([":speech_balloon: Ask", ":globe_with_meridians: Explore Graph"])
 
 # ---------- Ask tab ----------
@@ -161,7 +201,17 @@ with tab_ask:
         with st.chat_message("user"):
             st.markdown(turn["question"])
         with st.chat_message("assistant"):
-            st.markdown(turn["answer"])
+            if turn.get("category"):
+                st.caption(f"Categories present: `{turn['category']}`")
+            cards = turn.get("trend_cards") or []
+            if cards:
+                sbi = {s["article_id"]: s for s in turn.get("sources", [])}
+                _render_trend_cards(cards, sbi)
+            else:
+                st.markdown(turn.get("trends", ""))
+            if turn.get("developments"):
+                with st.expander(f"All retrieved developments ({len(turn.get('sources', []))})"):
+                    st.markdown(turn["developments"])
             if turn.get("sources"):
                 with st.expander(f"Sources ({len(turn['sources'])})"):
                     for i, src in enumerate(turn["sources"], 1):
@@ -188,22 +238,44 @@ with tab_ask:
         with st.chat_message("assistant"):
             with st.spinner("Searching corpus and generating answer..."):
                 try:
-                    result = cached_answer(question, k, None, model_name)
+                    result = cached_answer(question, k, model_name)
                 except Exception as e:
                     st.error(f"Error: {e}")
                     st.stop()
 
-                st.markdown(result["answer"])
+                trends_text = result.get("trends") or result.get("answer", "")
+                developments_text = result.get("developments", "")
+                category_label = result.get("category", "")
+                trends_model_label = result.get("trends_model", "")
+                cards = result.get("trend_cards") or []
+                if category_label:
+                    st.caption(f"Categories present: `{category_label}`")
+                if cards:
+                    sbi = {s["article_id"]: s for s in result.get("sources", [])}
+                    _render_trend_cards(cards, sbi)
+                else:
+                    st.markdown(trends_text)
+                if developments_text:
+                    with st.expander(f"All retrieved developments ({len(result.get('sources', []))})"):
+                        st.markdown(developments_text)
                 intent = result.get("intent", "research")
                 cache_label = " (cached)" if result.get("cache_layer") == "disk" else ""
                 if intent == "research":
+                    model_line = ""
+                    if trends_model_label:
+                        model_line = f"trends_model={trends_model_label} | "
                     st.caption(
-                        f"model={result['model']} | "
+                        f"{model_line}"
                         f"prompt_tokens={result['input_tokens']} "
                         f"output_tokens={result['output_tokens']}{cache_label}"
                     )
                 else:
                     st.caption(f"intent={intent} (no retrieval, no LLM call){cache_label}")
+                notes = result.get("notes") or []
+                if notes:
+                    with st.expander(f"Post-filter notes ({len(notes)})"):
+                        for n in notes:
+                            st.caption(f"• {n}")
 
                 if result["sources"]:
                     with st.expander(f"Sources ({len(result['sources'])})"):
@@ -244,7 +316,10 @@ with tab_ask:
 
                 st.session_state.history.append({
                     "question": question,
-                    "answer": result["answer"],
+                    "trends": trends_text,
+                    "trend_cards": cards,
+                    "developments": developments_text,
+                    "category": category_label,
                     "sources": result["sources"],
                     "subgraph_html": subgraph_html,
                 })

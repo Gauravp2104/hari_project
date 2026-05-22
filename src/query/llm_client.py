@@ -1,31 +1,29 @@
-"""Reusable Anthropic chat client used by the RAG answer pipeline.
+"""Reusable chat client backed by a local Ollama server.
 
-Build the client once with the system prompt that fits your use case, then call
-.chat() per request. The system prompt is sent with prompt-caching enabled so
-repeat questions reuse the cached prefix for ~90% cost reduction on the system
-portion.
-
-Example:
-    client = AnthropicChatClient(
-        model="claude-haiku-4-5",
-        system_prompt="You are a packaging-industry research assistant...",
-    )
-    response = client.chat("What's happening with bioplastics?")
-    print(response.content)
+Calls a locally-served open-weight model (qwen2.5, llama3.2, mistral, …) over
+Ollama's HTTP chat API. No API key required — assumes `ollama serve` is running
+on `OLLAMA_HOST` (default http://localhost:11434) and that the chosen model has
+been pulled (e.g. `ollama pull qwen2.5:3b`).
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from anthropic import Anthropic
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from configs.config import ANSWER_MAX_TOKENS, ANSWER_MODEL, ANSWER_TEMPERATURE  # noqa: E402
+from configs.config import (  # noqa: E402
+    ANSWER_MAX_TOKENS,
+    ANSWER_MODEL,
+    ANSWER_TEMPERATURE,
+    OLLAMA_HOST,
+)
 
 
 @dataclass
@@ -38,19 +36,25 @@ class ChatResponse:
     raw: Any = field(default=None)
 
 
-class AnthropicChatClient:
+class OllamaChatClient:
     def __init__(
         self,
         model: str = ANSWER_MODEL,
         system_prompt: str | None = None,
         max_tokens: int = ANSWER_MAX_TOKENS,
         temperature: float = ANSWER_TEMPERATURE,
+        host: str | None = None,
+        timeout: float = 300.0,
+        api_key: str | None = None,
     ):
-        self._client = Anthropic()
+        self.host = (host or os.environ.get("OLLAMA_HOST") or OLLAMA_HOST).rstrip("/")
         self.model = model
         self.system_prompt = system_prompt or ""
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.timeout = timeout
+        # Only sent when the host needs auth (e.g. https://ollama.com cloud endpoint).
+        self.api_key = api_key or os.environ.get("OLLAMA_API_KEY")
 
     def chat(
         self,
@@ -61,45 +65,50 @@ class AnthropicChatClient:
     ) -> ChatResponse:
         sys_prompt = system_prompt if system_prompt is not None else self.system_prompt
         messages: list[dict] = []
+        if sys_prompt:
+            messages.append({"role": "system", "content": sys_prompt})
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
-        kwargs: dict = {
+        payload = {
             "model": self.model,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
             "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.max_tokens,
+            },
         }
-        if sys_prompt:
-            kwargs["system"] = [{
-                "type": "text",
-                "text": sys_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }]
 
-        response = self._client.messages.create(**kwargs)
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
-        text = "".join(
-            block.text for block in response.content if getattr(block, "type", "") == "text"
-        ).strip()
-
-        usage = response.usage
-        prompt_tokens = (
-            (usage.input_tokens or 0)
-            + (getattr(usage, "cache_read_input_tokens", 0) or 0)
-            + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        response = requests.post(
+            f"{self.host}/api/chat",
+            json=payload,
+            headers=headers or None,
+            timeout=self.timeout,
         )
+        response.raise_for_status()
+        data = response.json()
+
+        text = (data.get("message", {}).get("content") or "").strip()
 
         return ChatResponse(
             content=text,
             model=self.model,
-            prompt_tokens=prompt_tokens,
-            output_tokens=usage.output_tokens or 0,
-            raw=response,
+            prompt_tokens=int(data.get("prompt_eval_count", 0) or 0),
+            output_tokens=int(data.get("eval_count", 0) or 0),
+            raw=data,
         )
 
 
+# Back-compat alias so older imports keep working during the migration.
+HFChatClient = OllamaChatClient
+
+
 @lru_cache(maxsize=8)
-def get_default_client(model: str = ANSWER_MODEL) -> AnthropicChatClient:
-    return AnthropicChatClient(model=model)
+def get_default_client(model: str = ANSWER_MODEL) -> OllamaChatClient:
+    return OllamaChatClient(model=model)

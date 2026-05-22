@@ -1,17 +1,24 @@
-"""Lightweight intent classifier so the RAG pipeline doesn't run on chit-chat.
+"""Intent classifier driven by a small local LLM (DeepSeek via Ollama).
 
-Decision rules (in order):
-  1. Empty input              -> GREETING
-  2. Has '?' AND not META     -> RESEARCH (questions are almost always research)
-  3. Short (<= 4 words) AND matches greeting/thanks/goodbye pattern -> chit-chat
-  4. Matches META pattern     -> META (allowed to be longer, e.g. "what can you do for me")
-  5. Otherwise                -> RESEARCH
+Routes the user message into one of five intents before the RAG pipeline runs.
+Only RESEARCH triggers retrieval; everything else gets a canned reply.
+
+The DeepSeek reasoning model can emit `<think>...</think>` blocks; we strip
+those before parsing the label. If the LLM call fails for any reason we
+fall back to RESEARCH so the user still gets an answer.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from enum import Enum
+from functools import lru_cache
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from configs.config import INTENT_MAX_TOKENS, INTENT_MODEL, INTENT_TEMPERATURE  # noqa: E402
+from src.query.llm_client import OllamaChatClient  # noqa: E402
 
 
 class Intent(str, Enum):
@@ -22,31 +29,52 @@ class Intent(str, Enum):
     RESEARCH = "research"
 
 
-GREETING_PATTERNS = [
-    re.compile(r"\b(hi|hello|hey|howdy|hola|yo|sup)\b", re.I),
-    re.compile(r"\bgood (morning|afternoon|evening|day)\b", re.I),
-    re.compile(r"\bwhat'?s up\b", re.I),
-    re.compile(r"\b(how (are|r) (you|u)|how(')?s it going|how(')?ve you been)\b", re.I),
-]
-
-THANKS_PATTERNS = [
-    re.compile(r"\b(thanks|thank you|thx|cheers|appreciate it|much obliged|ty)\b", re.I),
-]
-
-GOODBYE_PATTERNS = [
-    re.compile(r"\b(bye|goodbye|cya|see you|see ya|later|farewell|adios|good ?night|nite)\b", re.I),
-]
-
-META_PATTERNS = [
-    re.compile(r"\b(who (are|r) (you|u)|what (are|r) (you|u))\b", re.I),
-    re.compile(r"\b(what can you (do|help with|tell me)|how do you work|how can you help)\b", re.I),
-    re.compile(r"\b(what (do you|data|info|sources) (do you )?(have|know|cover))\b", re.I),
-    re.compile(r"\b(your (capabilities|features|sources|data))\b", re.I),
-]
+INTENT_SYSTEM_PROMPT = (
+    "You are an intent classifier for a research assistant on the global "
+    "packaging industry. Given the user's message, output EXACTLY ONE label "
+    "from this set:\n\n"
+    "  - RESEARCH  — a substantive question about packaging companies, "
+    "regulations, materials, M&A, sustainability, trends, etc.\n"
+    "  - GREETING  — hello / hi / good morning / how are you / etc.\n"
+    "  - THANKS    — thank you / thanks / appreciate it / cheers / etc.\n"
+    "  - GOODBYE   — bye / see you / goodnight / etc.\n"
+    "  - META      — 'who are you', 'what can you do', 'what data do you have'\n\n"
+    "RULES:\n"
+    "1. Output only the single label, in uppercase. No explanation, no "
+    "punctuation, no surrounding text.\n"
+    "2. If the message is a substantive question or statement about the "
+    "packaging industry, choose RESEARCH.\n"
+    "3. When ambiguous, prefer RESEARCH so the user still gets an answer."
+)
 
 
-def _matches(text: str, patterns: list[re.Pattern]) -> bool:
-    return any(p.search(text) for p in patterns)
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_LABEL_RE = re.compile(r"\b(RESEARCH|GREETING|THANKS|GOODBYE|META)\b", re.IGNORECASE)
+
+
+@lru_cache(maxsize=1)
+def _intent_client() -> OllamaChatClient:
+    return OllamaChatClient(
+        model=INTENT_MODEL,
+        max_tokens=INTENT_MAX_TOKENS,
+        temperature=INTENT_TEMPERATURE,
+    )
+
+
+def _parse_intent(raw: str) -> Intent:
+    """Strip DeepSeek reasoning tags and pull the last label out of the reply."""
+    cleaned = _THINK_BLOCK_RE.sub("", raw or "").strip()
+    matches = _LABEL_RE.findall(cleaned)
+    if not matches:
+        # Reasoning may have leaked into the body — search the whole reply.
+        matches = _LABEL_RE.findall(raw or "")
+    if not matches:
+        return Intent.RESEARCH
+    label = matches[-1].lower()
+    try:
+        return Intent(label)
+    except ValueError:
+        return Intent.RESEARCH
 
 
 def classify_intent(text: str) -> Intent:
@@ -54,29 +82,11 @@ def classify_intent(text: str) -> Intent:
     if not t:
         return Intent.GREETING
 
-    word_count = len(t.split())
-    has_question = "?" in t
-
-    if has_question and not _matches(t, META_PATTERNS):
+    try:
+        response = _intent_client().chat(t, system_prompt=INTENT_SYSTEM_PROMPT)
+    except Exception:
         return Intent.RESEARCH
-
-    if word_count <= 4:
-        if _matches(t, GREETING_PATTERNS):
-            return Intent.GREETING
-        if _matches(t, THANKS_PATTERNS):
-            return Intent.THANKS
-        if _matches(t, GOODBYE_PATTERNS):
-            return Intent.GOODBYE
-
-    if _matches(t, META_PATTERNS):
-        return Intent.META
-
-    if word_count <= 6 and _matches(t, GOODBYE_PATTERNS):
-        return Intent.GOODBYE
-    if word_count <= 6 and _matches(t, THANKS_PATTERNS):
-        return Intent.THANKS
-
-    return Intent.RESEARCH
+    return _parse_intent(response.content)
 
 
 CHITCHAT_RESPONSES = {

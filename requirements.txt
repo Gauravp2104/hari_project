@@ -16,7 +16,8 @@ sentence-transformers>=3.0
 chromadb>=0.5
 
 # --- RAG orchestration & LLM ---
-anthropic>=0.40          # Claude Haiku 4.5 — used for both question answering and KG relation extraction
+requests>=2.31           # HTTP client used to talk to the local Ollama server
+anthropic>=0.40          # Optional: only used when rebuilding the KG offline
 langchain>=0.3
 langchain-community>=0.3
 
